@@ -18,7 +18,7 @@ function time_ago($timestamp) {
     else return date('M d, Y', $time_ago);
 }
 
-// Logic: Only show Published/Scheduled posts passed time
+// Logic: Show Published or Scheduled posts that have passed the time
 $sql = "SELECT * FROM posts 
         WHERE status = 'published' OR (status = 'scheduled' AND scheduled_at <= NOW()) 
         ORDER BY scheduled_at DESC LIMIT 6";
@@ -41,8 +41,15 @@ $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 extend: {
                     fontFamily: { sans: ['Outfit', 'sans-serif'] },
                     colors: { brand: { blue: '#2563EB', dark: '#0F172A', light: '#F8FAFC' } },
-                    animation: { 'fade-up': 'fadeUp 0.6s ease-out forwards', 'pulse-slow': 'pulse 3s infinite' },
-                    keyframes: { fadeUp: { '0%': { opacity: '0', transform: 'translateY(20px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } } }
+                    animation: { 
+                        'fade-up': 'fadeUp 0.6s ease-out forwards', 
+                        'pulse-slow': 'pulse 4s infinite',
+                        'float': 'float 6s ease-in-out infinite'
+                    },
+                    keyframes: { 
+                        fadeUp: { '0%': { opacity: '0', transform: 'translateY(20px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+                        float: { '0%, 100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-20px)' } }
+                    }
                 }
             }
         }
@@ -103,16 +110,16 @@ $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </nav>
 
-    <header class="relative pt-20 pb-32 bg-white overflow-hidden">
+    <header class="relative pt-24 pb-32 bg-white overflow-hidden">
         
         <div class="absolute top-0 left-1/2 w-full -translate-x-1/2 h-full z-0 pointer-events-none">
-            <div class="absolute top-20 left-10 w-72 h-72 bg-blue-400/20 rounded-full blur-[100px] animate-pulse-slow"></div>
-            <div class="absolute bottom-10 right-10 w-96 h-96 bg-purple-400/20 rounded-full blur-[100px] animate-pulse-slow" style="animation-delay: 1s;"></div>
+            <div class="absolute top-[-10%] left-[-10%] w-[600px] h-[600px] bg-blue-100/50 rounded-full blur-[120px] animate-pulse-slow"></div>
+            <div class="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-purple-100/50 rounded-full blur-[120px] animate-pulse-slow" style="animation-delay: 2s;"></div>
         </div>
 
         <div class="container mx-auto px-4 relative z-10 text-center max-w-5xl">
             
-            <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-50 border border-blue-100 text-brand-blue text-xs font-bold uppercase tracking-wide mb-8 animate-fade-up shadow-sm">
+            <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-gray-200 shadow-sm text-brand-blue text-xs font-bold uppercase tracking-wide mb-8 animate-fade-up hover:scale-105 transition duration-300">
                 <span class="relative flex h-2.5 w-2.5">
                   <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                   <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
@@ -120,36 +127,36 @@ $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 The #1 Platform for Tech Skills
             </div>
 
-            <h1 class="text-5xl md:text-7xl font-extrabold text-brand-dark leading-tight mb-8 animate-fade-up" style="animation-delay: 0.1s;">
-                Turn Your Ideas into <br class="hidden md:block" />
-                <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-blue via-blue-500 to-purple-600">Real-World Innovation</span>
+            <h1 class="text-5xl md:text-7xl font-extrabold text-brand-dark leading-[1.1] mb-8 animate-fade-up" style="animation-delay: 0.1s;">
+                Master Skills That <br class="hidden md:block" />
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-blue via-blue-500 to-purple-600 drop-shadow-sm">Matter in 2026</span>
             </h1>
 
             <p class="text-lg md:text-xl text-gray-500 mb-10 max-w-2xl mx-auto leading-relaxed animate-fade-up" style="animation-delay: 0.2s;">
-                Stop watching boring tutorials. Start building with our high-quality source codes for Android, Web, and IoT projects. <span class="text-gray-900 font-bold">Completely Free.</span>
+                Don't just watch tutorials. Build real-world projects with our open-source guides on Android, Web, and IoT. <span class="text-gray-900 font-semibold underline decoration-brand-blue decoration-2">Start building today.</span>
             </p>
 
             <div class="flex flex-col sm:flex-row gap-4 justify-center animate-fade-up" style="animation-delay: 0.3s;">
-                <a href="#latest" class="px-8 py-4 bg-brand-blue text-white rounded-xl font-bold shadow-xl shadow-blue-500/30 hover:bg-blue-600 hover:scale-105 transition transform flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-rocket"></i> Start Learning
+                <a href="#latest" class="px-8 py-4 bg-brand-blue text-white rounded-xl font-bold shadow-xl shadow-blue-500/20 hover:bg-blue-600 hover:-translate-y-1 transition transform flex items-center justify-center gap-2 group">
+                    Start Learning <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition"></i>
                 </a>
                 <a href="category.php?name=Android" class="px-8 py-4 bg-white text-gray-700 border border-gray-200 rounded-xl font-bold hover:bg-gray-50 hover:border-gray-300 transition flex items-center justify-center gap-2">
-                    <i class="fa-brands fa-github"></i> View Projects
+                    <i class="fa-brands fa-github text-lg"></i> Source Codes
                 </a>
             </div>
 
-            <div class="mt-16 pt-8 border-t border-gray-100/50 flex flex-wrap justify-center gap-8 md:gap-16 text-gray-400 opacity-80 animate-fade-up" style="animation-delay: 0.4s;">
-                <div class="flex items-center gap-2 grayscale hover:grayscale-0 transition duration-300">
-                    <i class="fa-brands fa-android text-2xl text-green-500"></i> <span class="font-bold text-sm text-gray-600">Android Studio</span>
+            <div class="mt-20 pt-8 border-t border-gray-100/50 flex flex-wrap justify-center gap-8 md:gap-16 text-gray-400 opacity-90 animate-fade-up" style="animation-delay: 0.4s;">
+                <div class="flex items-center gap-3 hover:text-gray-600 transition duration-300">
+                    <i class="fa-brands fa-android text-2xl text-green-500"></i> <span class="font-bold text-sm">Android</span>
                 </div>
-                <div class="flex items-center gap-2 grayscale hover:grayscale-0 transition duration-300">
-                    <i class="fa-brands fa-laravel text-2xl text-red-500"></i> <span class="font-bold text-sm text-gray-600">Laravel</span>
+                <div class="flex items-center gap-3 hover:text-gray-600 transition duration-300">
+                    <i class="fa-brands fa-laravel text-2xl text-red-500"></i> <span class="font-bold text-sm">Laravel</span>
                 </div>
-                <div class="flex items-center gap-2 grayscale hover:grayscale-0 transition duration-300">
-                    <i class="fa-brands fa-react text-2xl text-blue-400"></i> <span class="font-bold text-sm text-gray-600">React JS</span>
+                <div class="flex items-center gap-3 hover:text-gray-600 transition duration-300">
+                    <i class="fa-brands fa-react text-2xl text-blue-400"></i> <span class="font-bold text-sm">React JS</span>
                 </div>
-                <div class="flex items-center gap-2 grayscale hover:grayscale-0 transition duration-300">
-                    <i class="fa-solid fa-microchip text-2xl text-purple-500"></i> <span class="font-bold text-sm text-gray-600">Arduino IoT</span>
+                <div class="flex items-center gap-3 hover:text-gray-600 transition duration-300">
+                    <i class="fa-solid fa-microchip text-2xl text-purple-500"></i> <span class="font-bold text-sm">IoT & Robotics</span>
                 </div>
             </div>
 
@@ -158,19 +165,19 @@ $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     <main id="latest" class="container mx-auto px-4 py-20 bg-white">
         
-        <div class="flex flex-col md:flex-row justify-between items-end mb-12 gap-4">
+        <div class="flex flex-col md:flex-row justify-between items-end mb-12 gap-4 border-b border-gray-100 pb-4">
             <div>
                 <h2 class="text-3xl font-bold text-brand-dark">Latest Updates</h2>
-                <p class="text-gray-500 mt-2">Fresh tutorials added this week</p>
+                <p class="text-gray-500 mt-2 text-sm">Explore our newest tutorials and guides</p>
             </div>
-            <a href="category.php" class="text-brand-blue font-bold hover:underline flex items-center gap-2">
+            <a href="category.php" class="text-brand-blue font-bold hover:underline flex items-center gap-2 text-sm">
                 View All Posts <i class="fa-solid fa-arrow-right"></i>
             </a>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             <?php foreach($posts as $i => $post): ?>
-            <article class="bg-white rounded-3xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-2xl hover:shadow-blue-500/10 hover:-translate-y-1 transition-all duration-300 flex flex-col h-full group animate-fade-up" style="animation-delay: <?php echo $i * 100; ?>ms">
+            <article class="bg-white rounded-3xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-2xl hover:shadow-blue-500/10 hover:-translate-y-2 transition-all duration-300 flex flex-col h-full group animate-fade-up" style="animation-delay: <?php echo $i * 100; ?>ms">
                 
                 <div class="relative h-56 overflow-hidden">
                     <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition duration-500 z-10"></div>
@@ -211,25 +218,45 @@ $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </main>
 
-    <footer class="bg-brand-dark text-white py-16 border-t border-white/10">
-        <div class="container mx-auto px-4 text-center">
-            <div class="inline-flex items-center gap-2 mb-6">
-                <span class="w-8 h-8 rounded-lg bg-brand-blue text-white flex items-center justify-center text-sm"><i class="fa-solid fa-code"></i></span>
-                <span class="text-2xl font-bold tracking-tight">RajTech</span>
-            </div>
-            <p class="text-gray-400 max-w-md mx-auto text-sm mb-8 leading-relaxed">
-                Empowering the next generation of developers with free, high-quality, and project-based education.
-            </p>
-            
-            <div class="flex justify-center gap-6 mb-8">
-                <a href="#" class="text-gray-400 hover:text-white transition transform hover:scale-110"><i class="fa-brands fa-facebook text-xl"></i></a>
-                <a href="#" class="text-gray-400 hover:text-white transition transform hover:scale-110"><i class="fa-brands fa-youtube text-xl"></i></a>
-                <a href="#" class="text-gray-400 hover:text-white transition transform hover:scale-110"><i class="fa-brands fa-github text-xl"></i></a>
+    <footer class="bg-brand-dark text-white py-12 border-t border-white/10">
+        <div class="container mx-auto px-4">
+            <div class="grid md:grid-cols-4 gap-8 mb-8 text-center md:text-left">
+                
+                <div class="col-span-1 md:col-span-2">
+                    <div class="inline-flex items-center gap-2 mb-4">
+                        <span class="w-8 h-8 rounded-lg bg-brand-blue text-white flex items-center justify-center text-sm"><i class="fa-solid fa-code"></i></span>
+                        <span class="text-2xl font-bold tracking-tight">RajTech</span>
+                    </div>
+                    <p class="text-gray-400 text-sm leading-relaxed max-w-sm mx-auto md:mx-0">
+                        Empowering developers with free, high-quality, and project-based education. Built for the community.
+                    </p>
+                </div>
+
+                <div>
+                    <h4 class="font-bold mb-4 text-gray-200">Company</h4>
+                    <ul class="space-y-2 text-sm text-gray-400">
+                        <li><a href="about.php" class="hover:text-brand-blue transition">About Us</a></li>
+                        <li><a href="contact.php" class="hover:text-brand-blue transition">Contact</a></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4 class="font-bold mb-4 text-gray-200">Legal</h4>
+                    <ul class="space-y-2 text-sm text-gray-400">
+                        <li><a href="privacy.php" class="hover:text-brand-blue transition">Privacy Policy</a></li>
+                        <li><a href="terms.php" class="hover:text-brand-blue transition">Terms & Conditions</a></li>
+                    </ul>
+                </div>
             </div>
 
-            <p class="text-gray-500 text-xs border-t border-white/10 pt-8">
-                &copy; 2026 RajTech. Designed for AdSense Approval.
-            </p>
+            <div class="border-t border-white/10 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-500">
+                <p>&copy; 2026 RajTech. All rights reserved.</p>
+                <div class="flex gap-4">
+                    <a href="#" class="hover:text-white transition transform hover:scale-110"><i class="fa-brands fa-facebook text-lg"></i></a>
+                    <a href="#" class="hover:text-white transition transform hover:scale-110"><i class="fa-brands fa-youtube text-lg"></i></a>
+                    <a href="#" class="hover:text-white transition transform hover:scale-110"><i class="fa-brands fa-github text-lg"></i></a>
+                </div>
+            </div>
         </div>
     </footer>
 
