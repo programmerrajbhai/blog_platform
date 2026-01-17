@@ -1,0 +1,98 @@
+[
+    {
+        "id": "9e98a39d69f47976",
+        "title": "Title",
+        "slug": "title",
+        "category": "Tech",
+        "author": "RajTech",
+        "status": "draft",
+        "published_at": "2026-01-17 14:58:29",
+        "read_minutes": 1,
+        "tags": [
+            "php",
+            "pdo",
+            "mysql",
+            "backend"
+        ],
+        "image": "uploads/20260117145846-5bc5e5c1.png",
+        "thumb": "uploads/thumbs/thumb-20260117145846-5bc5e5c1.png",
+        "meta_image": "",
+        "seo_title": "",
+        "seo_desc": "",
+        "preview_token": "c578a02e142f0f7af3b565b6",
+        "content": "<p>Des</p>",
+        "updated_at": "2026-01-17 14:59:02"
+    },
+    {
+        "id": "p1",
+        "title": "How to Connect MySQL with PHP PDO (2026)",
+        "slug": "php-pdo-mysql-connection",
+        "category": "PHP",
+        "author": "RajTech",
+        "status": "published",
+        "published_at": "2026-01-15 10:30:00",
+        "read_minutes": 6,
+        "tags": [
+            "php",
+            "pdo",
+            "mysql",
+            "backend"
+        ],
+        "image": "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?q=80&w=1200&auto=format&fit=crop",
+        "thumb": "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?q=80&w=600&auto=format&fit=crop",
+        "meta_image": "",
+        "seo_title": "PHP PDO MySQL Connection – Secure Database Guide",
+        "seo_desc": "Learn how to connect MySQL database using PHP PDO with best security practices.",
+        "preview_token": "tok123pdo",
+        "content": "<p>PHP PDO is the most secure way to connect database in modern PHP applications.</p><h2>Why PDO?</h2><p>PDO supports prepared statements which prevent SQL injection.</p><h3>Connection Example</h3><pre><code>$pdo = new PDO(\"mysql:host=localhost;dbname=test\", \"root\", \"\");</code></pre>",
+        "updated_at": "2026-01-15 10:30:00"
+    },
+    {
+        "id": "p2",
+        "title": "Laravel 11 REST API Complete Guide",
+        "slug": "laravel-11-rest-api-guide",
+        "category": "Laravel",
+        "author": "RajTech",
+        "status": "published",
+        "published_at": "2026-01-16 14:00:00",
+        "read_minutes": 8,
+        "tags": [
+            "laravel",
+            "api",
+            "backend",
+            "php"
+        ],
+        "image": "https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&auto=format&fit=crop",
+        "thumb": "https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=600&auto=format&fit=crop",
+        "meta_image": "",
+        "seo_title": "Laravel 11 REST API Tutorial",
+        "seo_desc": "Step by step Laravel 11 REST API development with authentication.",
+        "preview_token": "tok456api",
+        "content": "<p>Laravel 11 makes API development faster and cleaner.</p><h2>API Structure</h2><p>Use controllers, routes and resources.</p><h3>Example Route</h3><pre><code>Route::get('/users', [UserController::class, 'index']);</code></pre>",
+        "updated_at": "2026-01-16 14:00:00"
+    },
+    {
+        "id": "p3",
+        "title": "Flutter GetX State Management Explained",
+        "slug": "flutter-getx-state-management",
+        "category": "Flutter",
+        "author": "RajTech",
+        "status": "published",
+        "published_at": "2026-01-17 09:15:00",
+        "read_minutes": 7,
+        "tags": [
+            "flutter",
+            "getx",
+            "mobile",
+            "dart"
+        ],
+        "image": "https://images.unsplash.com/photo-1551650975-87deedd944c3?q=80&w=1200&auto=format&fit=crop",
+        "thumb": "https://images.unsplash.com/photo-1551650975-87deedd944c3?q=80&w=600&auto=format&fit=crop",
+        "meta_image": "",
+        "seo_title": "Flutter GetX State Management Full Guide",
+        "seo_desc": "Understand Flutter GetX state management with real examples.",
+        "preview_token": "tok789getx",
+        "content": "<p>GetX is one of the most powerful state management solutions in Flutter.</p><h2>Why GetX?</h2><p>It is fast, lightweight and easy.</p><h3>Controller Example</h3><pre><code>class CounterController extends GetxController { var count = 0.obs; }</code></pre>",
+        "updated_at": "2026-01-17 09:15:00"
+    }
+]
