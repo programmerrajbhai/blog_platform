@@ -1,11 +1,33 @@
 [
     {
+        "id": "e9a43f0ebc70a8ea",
+        "title": "Title 2",
+        "slug": "title-2",
+        "category": "Tech",
+        "author": "RajTech",
+        "status": "published",
+        "published_at": "2026-01-17 15:10:54",
+        "read_minutes": 1,
+        "tags": [
+            "php",
+            "pdo",
+            "mysql",
+            "backend"
+        ],
+        "image": "uploads/20260117151108-a962b719.jpeg",
+        "thumb": "uploads/thumbs/thumb-20260117151108-a962b719.jpeg",
+        "seo_desc": "",
+        "preview_token": "3e3d926bcb41bfce699a5601",
+        "content": "des 2",
+        "updated_at": "2026-01-17 15:11:18"
+    },
+    {
         "id": "9e98a39d69f47976",
         "title": "Title",
         "slug": "title",
         "category": "Tech",
         "author": "RajTech",
-        "status": "draft",
+        "status": "published",
         "published_at": "2026-01-17 14:58:29",
         "read_minutes": 1,
         "tags": [
@@ -21,7 +43,7 @@
         "seo_desc": "",
         "preview_token": "c578a02e142f0f7af3b565b6",
         "content": "<p>Des</p>",
-        "updated_at": "2026-01-17 14:59:02"
+        "updated_at": "2026-01-17 15:10:12"
     },
     {
         "id": "p1",

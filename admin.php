@@ -1,618 +1,375 @@
 <?php
-declare(strict_types=1);
-date_default_timezone_set('Asia/Dhaka');
 session_start();
+require 'db.php';
 
-/**
- * =========================================================
- * RajTech Admin Panel (Modern & Easy)
- * - Clean Writing Interface
- * - Real-time Split Preview
- * - Advanced Fields Hidden by Default
- * =========================================================
- */
-
-$DATA_FILE  = __DIR__ . '/data/posts.json';
-$DATA_DIR   = __DIR__ . '/data';
-$UPLOAD_DIR = __DIR__ . '/uploads';
-$UPLOAD_URL = 'uploads';
-
-// ✅ Admin login
-$ADMIN_USER = 'admin';
-$ADMIN_PASS = '123456';
-
-// --- Helper Functions ---
-function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
-function now_local(): string { return date('Y-m-d H:i:s'); }
-function flash(string $msg): void { $_SESSION['flash'] = $msg; }
-function get_flash(): string { $m = $_SESSION['flash'] ?? ''; unset($_SESSION['flash']); return (string)$m; }
-function ensure_dir(string $dir): void { if (!is_dir($dir)) @mkdir($dir, 0775, true); }
-
-function read_posts(string $file): array {
-  if (!file_exists($file)) return [];
-  $j = file_get_contents($file);
-  $d = json_decode($j ?: '[]', true);
-  return is_array($d) ? $d : [];
-}
-
-function write_posts(string $file, array $data): bool {
-  ensure_dir(dirname($file));
-  $fp = @fopen($file, 'c+');
-  if (!$fp) return false;
-  if (!flock($fp, LOCK_EX)) { fclose($fp); return false; }
-  ftruncate($fp, 0);
-  rewind($fp);
-  $ok = fwrite($fp, json_encode($data, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)) !== false;
-  fflush($fp);
-  flock($fp, LOCK_UN);
-  fclose($fp);
-  return $ok;
-}
-
-function slugify(string $text): string {
-  $text = trim(mb_strtolower($text));
-  $text = preg_replace('~[^\pL\pN]+~u', '-', $text);
-  $text = trim($text, '-');
-  return $text !== '' ? $text : 'post';
-}
-
-function compute_read_minutes(string $html): int {
-  $words = str_word_count(strip_tags($html));
-  return max(1, (int)ceil($words / 200));
-}
-
-function random_token(int $bytes=12): string { return bin2hex(random_bytes($bytes)); }
-
-function require_login(): void {
-  if (!($_SESSION['admin_logged_in'] ?? false)) {
-    header('Location: admin.php');
+// ---------------------------------------------------------
+// 1. AUTHENTICATION
+// ---------------------------------------------------------
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header("Location: admin.php");
     exit();
-  }
 }
 
-function find_index_by_id(array $posts, string $id): int {
-  foreach ($posts as $i => $p) if (($p['id'] ?? '') === $id) return $i;
-  return -1;
+if (isset($_POST['login'])) {
+    if ($_POST['username'] === 'admin' && $_POST['password'] === '123456') {
+        $_SESSION['admin_logged_in'] = true;
+        header("Location: admin.php");
+        exit();
+    } else {
+        $error = "❌ Invalid Credentials";
+    }
 }
 
-// Image handling
-function ext_ok(string $ext): bool {
-  return in_array(strtolower($ext), ['jpg','jpeg','png','webp'], true);
+// ---------------------------------------------------------
+// 2. FETCH DATA
+// ---------------------------------------------------------
+$cats = [];
+if (isset($_SESSION['admin_logged_in'])) {
+    $stmt_cat = $conn->query("SELECT DISTINCT category FROM posts ORDER BY category ASC");
+    $cats = $stmt_cat->fetchAll(PDO::FETCH_COLUMN);
 }
 
-function make_thumb(string $src, string $dst, int $maxW=700): bool {
-  if (!extension_loaded('gd')) return false;
-  $info = @getimagesize($src);
-  if (!$info) return false;
-  [$w,$h] = $info;
-  if ($w <= 0 || $h <= 0) return false;
+// ---------------------------------------------------------
+// 3. PUBLISH LOGIC (With Image Upload)
+// ---------------------------------------------------------
+$msg = ""; $msg_type = "";
 
-  $ratio = $w / $h;
-  $newW = min($maxW, $w);
-  $newH = (int)round($newW / $ratio);
+if (isset($_POST['publish']) && isset($_SESSION['admin_logged_in'])) {
+    $title = trim($_POST['title']);
+    $category = !empty($_POST['new_category']) ? $_POST['new_category'] : $_POST['category_select'];
+    $excerpt = $_POST['excerpt'];
+    $content = $_POST['content'];
+    $schedule_date = $_POST['scheduled_at'];
+    
+    // --- IMAGE HANDLING ---
+    $image_final = "";
+    
+    // Case A: File Upload
+    if (!empty($_FILES['image_file']['name'])) {
+        $target_dir = "uploads/";
+        if (!file_exists($target_dir)) mkdir($target_dir, 0777, true);
+        
+        $filename = time() . "_" . basename($_FILES["image_file"]["name"]);
+        $target_file = $target_dir . $filename;
+        $imageFileType = strtolower(pathinfo($target_file,PATHINFO_EXTENSION));
+        
+        // Simple Validation
+        if(in_array($imageFileType, ['jpg','png','jpeg','webp'])) {
+            if(move_uploaded_file($_FILES["image_file"]["tmp_name"], $target_file)) {
+                $image_final = $target_file; // Path saved to DB
+            } else {
+                $msg = "❌ Image upload failed!"; $msg_type = "error";
+            }
+        } else {
+            $msg = "❌ Only JPG, PNG, WEBP allowed!"; $msg_type = "error";
+        }
+    } 
+    // Case B: URL Input
+    else if (!empty($_POST['image_url'])) {
+        $image_final = $_POST['image_url'];
+    }
 
-  $mime = $info['mime'] ?? '';
-  $im = match($mime) {
-      'image/jpeg' => @imagecreatefromjpeg($src),
-      'image/png'  => @imagecreatefrompng($src),
-      'image/webp' => @imagecreatefromwebp($src),
-      default => false
-  };
+    // --- SAVE TO DB ---
+    if (!empty($title) && !empty($image_final) && empty($msg)) {
+        $current_date = date('Y-m-d H:i:s');
+        if ($schedule_date > $current_date) {
+            $status = 'scheduled';
+            $final_date = $schedule_date;
+            $alert_msg = "🕒 Scheduled for " . date("M d, h:i A", strtotime($final_date));
+        } else {
+            $status = 'published';
+            $final_date = $current_date;
+            $alert_msg = "✅ Published Successfully!";
+        }
 
-  if (!$im) return false;
-  $thumb = imagecreatetruecolor($newW, $newH);
-  if ($mime === 'image/png') {
-    imagealphablending($thumb, false);
-    imagesavealpha($thumb, true);
-  }
-  imagecopyresampled($thumb, $im, 0,0,0,0, $newW,$newH, $w,$h);
-
-  $ok = match($mime) {
-      'image/jpeg' => imagejpeg($thumb, $dst, 85),
-      'image/png'  => imagepng($thumb, $dst, 7),
-      'image/webp' => imagewebp($thumb, $dst, 85),
-      default => false
-  };
-
-  imagedestroy($im);
-  imagedestroy($thumb);
-  return $ok;
-}
-
-function post_preview_url(array $p): string {
-  $slug = rawurlencode((string)($p['slug'] ?? ''));
-  $tok  = rawurlencode((string)($p['preview_token'] ?? ''));
-  return "single.php?slug={$slug}&token={$tok}";
-}
-
-// ------------------ Ensure Setup ------------------
-ensure_dir($DATA_DIR);
-ensure_dir($UPLOAD_DIR);
-ensure_dir($UPLOAD_DIR . '/thumbs');
-if (!file_exists($DATA_FILE)) @file_put_contents($DATA_FILE, "[]");
-
-// ------------------ Logic ------------------
-$action = (string)($_GET['action'] ?? '');
-$logged = (bool)($_SESSION['admin_logged_in'] ?? false);
-$flash  = get_flash();
-$posts  = read_posts($DATA_FILE);
-
-// Auth Actions
-if ($action === 'logout') {
-  session_destroy();
-  header('Location: admin.php');
-  exit();
-}
-if (isset($_POST['do_login'])) {
-  $u = (string)($_POST['username'] ?? '');
-  $p = (string)($_POST['password'] ?? '');
-  if ($u === $ADMIN_USER && $p === $ADMIN_PASS) {
-    $_SESSION['admin_logged_in'] = true;
-    flash('Welcome back 👋');
-    header('Location: admin.php');
-    exit();
-  }
-  flash('Invalid credentials ❌');
-  header('Location: admin.php');
-  exit();
-}
-
-// Upload
-if ($action === 'upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-  require_login();
-  header('Content-Type: application/json');
-  if (!isset($_FILES['image']) || !is_uploaded_file($_FILES['image']['tmp_name'])) {
-    echo json_encode(['ok'=>false,'message'=>'No file']); exit();
-  }
-  $f = $_FILES['image'];
-  $ext = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION));
-  if (!ext_ok($ext)) { echo json_encode(['ok'=>false,'message'=>'Only JPG/PNG/WEBP']); exit(); }
-  
-  $fileName = date('YmdHis') . '-' . bin2hex(random_bytes(4)) . '.' . $ext;
-  $dest = $UPLOAD_DIR . '/' . $fileName;
-  
-  if (move_uploaded_file($f['tmp_name'], $dest)) {
-    $thumbName = 'thumb-' . $fileName;
-    make_thumb($dest, $UPLOAD_DIR . '/thumbs/' . $thumbName);
-    echo json_encode(['ok'=>true, 'url'=>$UPLOAD_URL.'/'.$fileName, 'thumb'=>$UPLOAD_URL.'/thumbs/'.$thumbName]);
-  } else {
-    echo json_encode(['ok'=>false,'message'=>'Upload failed']);
-  }
-  exit();
-}
-
-// Save
-if (isset($_POST['save_post'])) {
-  require_login();
-  $id = trim((string)($_POST['id'] ?? ''));
-  $title = trim((string)($_POST['title'] ?? ''));
-  $content = trim((string)($_POST['content'] ?? ''));
-  
-  if ($title === '') { flash('Title required!'); header('Location: admin.php?action=edit&id='.$id); exit(); }
-
-  $slug = $_POST['slug'] ?: slugify($title);
-  // unique slug check
-  $baseSlug = $slug; $c=2;
-  while(count(array_filter($posts, fn($p)=> ($p['id']!==$id && $p['slug']===$slug))) > 0) {
-      $slug = $baseSlug . '-' . $c++;
-  }
-
-  $tagsRaw = (string)($_POST['tags'] ?? '');
-  $tags = array_values(array_filter(array_map('trim', explode(',', $tagsRaw))));
-
-  $payload = [
-    'id' => $id ?: bin2hex(random_bytes(8)),
-    'title' => $title,
-    'slug' => $slug,
-    'category' => $_POST['category'] ?: 'Uncategorized',
-    'author' => $_POST['author'] ?: 'RajTech',
-    'status' => $_POST['status'] ?? 'draft',
-    'published_at' => $_POST['published_at'] ?: now_local(),
-    'read_minutes' => compute_read_minutes($content),
-    'tags' => $tags,
-    'image' => $_POST['image'] ?: '',
-    'thumb' => $_POST['thumb'] ?: '',
-    'meta_image' => $_POST['meta_image'] ?: '',
-    'seo_title' => $_POST['seo_title'] ?: '',
-    'seo_desc' => $_POST['seo_desc'] ?: '',
-    'preview_token' => $_POST['preview_token'] ?: random_token(),
-    'content' => $content,
-    'updated_at' => now_local()
-  ];
-
-  $idx = find_index_by_id($posts, $payload['id']);
-  if ($idx >= 0) $posts[$idx] = array_merge($posts[$idx], $payload);
-  else array_unshift($posts, $payload); // Add to top
-
-  write_posts($DATA_FILE, $posts);
-  flash('Saved successfully ✅');
-
-  $after = $_POST['after'] ?? 'dashboard';
-  if ($after === 'continue') header('Location: admin.php?action=edit&id='.rawurlencode($payload['id']));
-  elseif ($after === 'view') header('Location: single.php?slug='.rawurlencode($payload['slug']));
-  else header('Location: admin.php');
-  exit();
-}
-
-// Delete
-if ($action === 'delete' && isset($_GET['id'])) {
-  require_login();
-  $posts = array_values(array_filter($posts, fn($p)=> $p['id'] !== $_GET['id']));
-  write_posts($DATA_FILE, $posts);
-  flash('Deleted 🗑️');
-  header('Location: admin.php');
-  exit();
-}
-
-// Edit Prep
-$edit = null;
-if ($action === 'edit') {
-  require_login();
-  $id = (string)($_GET['id'] ?? '');
-  foreach ($posts as $p) if (($p['id']??'') === $id) { $edit = $p; break; }
-  if (!$edit) $edit = [
-    'id'=>'','title'=>'','slug'=>'','category'=>'Tech','author'=>'RajTech','status'=>'draft',
-    'published_at'=>now_local(),'tags'=>[],'image'=>'','thumb'=>'','content'=>'<p>Start writing...</p>'
-  ];
+        $sql = "INSERT INTO posts (title, category, image_url, excerpt, content, status, scheduled_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        
+        if($stmt->execute([$title, $category, $image_final, $excerpt, $content, $status, $final_date])) {
+            $msg = $alert_msg; $msg_type = "success";
+        } else {
+            $msg = "Database Error"; $msg_type = "error";
+        }
+    } else if(empty($image_final)) {
+        $msg = "⚠️ Image is required!"; $msg_type = "error";
+    }
 }
 ?>
-<!doctype html>
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Admin • RajTech</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script>
-    tailwind.config = { theme:{ extend:{ fontFamily:{ sans:['Inter','sans-serif'] } } } }
-  </script>
-  <style>
-    .editor { min-height: 400px; outline: none; line-height: 1.8; }
-    .editor h2 { font-size: 1.5em; font-weight: 700; margin: 1em 0 0.5em; }
-    .editor h3 { font-size: 1.25em; font-weight: 600; margin: 1em 0 0.5em; }
-    .editor ul { list-style: disc; padding-left: 1.5em; margin: 1em 0; }
-    .editor ol { list-style: decimal; padding-left: 1.5em; margin: 1em 0; }
-    .editor blockquote { border-left: 4px solid #e5e7eb; padding-left: 1em; color: #4b5563; font-style: italic; }
-    .editor pre { background: #1f2937; color: #fff; padding: 1em; border-radius: 0.5em; overflow-x: auto; margin: 1em 0; }
-    .editor img { max-width: 100%; border-radius: 0.5em; margin: 1em 0; }
-    .editor a { color: #2563eb; text-decoration: underline; }
-    /* Zen Mode inputs */
-    .zen-input { background: transparent; border: none; outline: none; width: 100%; }
-    .zen-input:focus { ring: 0; }
-  </style>
-</head>
-<body class="bg-gray-50 text-gray-800">
-
-<nav class="bg-white border-b h-14 flex items-center justify-between px-4 sticky top-0 z-40">
-  <div class="flex items-center gap-4">
-    <a href="admin.php" class="font-bold text-lg"><i class="fa-solid fa-cube text-blue-600"></i> RajTech Admin</a>
-    <a href="index.php" target="_blank" class="text-sm text-gray-500 hover:text-blue-600"><i class="fa-solid fa-arrow-up-right-from-square"></i> View Site</a>
-  </div>
-  <?php if($logged): ?>
-    <a href="admin.php?action=logout" class="text-xs font-semibold bg-gray-100 px-3 py-1.5 rounded-lg hover:bg-red-50 hover:text-red-600 transition">Logout</a>
-  <?php endif; ?>
-</nav>
-
-<div class="max-w-7xl mx-auto p-4 md:p-6">
-
-  <?php if($flash): ?>
-    <div class="fixed bottom-5 right-5 bg-gray-900 text-white px-5 py-3 rounded-xl shadow-lg animate-bounce z-50 flex items-center gap-3">
-      <i class="fa-solid fa-bell"></i> <?= e($flash) ?>
-    </div>
-  <?php endif; ?>
-
-  <?php if(!$logged): ?>
-    <div class="max-w-md mx-auto mt-20 bg-white p-8 rounded-2xl shadow-sm border">
-      <h1 class="text-2xl font-bold text-center mb-6">Login to Panel</h1>
-      <form method="post" class="space-y-4">
-        <input type="hidden" name="do_login" value="1">
-        <input name="username" class="w-full px-4 py-3 rounded-xl bg-gray-50 border focus:border-blue-500 outline-none" placeholder="Username">
-        <input name="password" type="password" class="w-full px-4 py-3 rounded-xl bg-gray-50 border focus:border-blue-500 outline-none" placeholder="Password">
-        <button class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition">Login</button>
-      </form>
-    </div>
-
-  <?php elseif($action === 'edit' && $edit): ?>
-    <form method="post" onsubmit="return syncContent()">
-      <input type="hidden" name="save_post" value="1">
-      <input type="hidden" name="id" value="<?= e((string)$edit['id']) ?>">
-      <input type="hidden" name="thumb" id="thumb" value="<?= e((string)($edit['thumb']??'')) ?>">
-      <input type="hidden" name="preview_token" value="<?= e((string)($edit['preview_token']??'')) ?>">
-      <input type="hidden" name="after" id="after" value="dashboard">
-      <textarea name="content" id="content" class="hidden"></textarea>
-
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-        <div>
-          <a href="admin.php" class="text-sm text-gray-500 hover:text-gray-900"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
-          <div class="flex items-center gap-2 mt-1">
-             <span class="text-xs font-bold uppercase tracking-wider text-gray-400"><?= $edit['id'] ? 'Editing' : 'New Post' ?></span>
-             <span class="bg-<?= ($edit['status']??'draft')==='published'?'green':'orange' ?>-100 text-<?= ($edit['status']??'draft')==='published'?'green':'orange' ?>-700 text-[10px] px-2 py-0.5 rounded-full uppercase font-bold"><?= $edit['status']??'draft' ?></span>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-           <button type="button" onclick="toggleSplitPreview()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-200 transition">
-             <i class="fa-solid fa-columns"></i> Split Preview
-           </button>
-           <button type="submit" onclick="setAfter('dashboard')" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-semibold hover:border-blue-500 transition">Save</button>
-           <button type="submit" onclick="setAfter('view')" class="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 shadow-md transition">Publish / View</button>
-        </div>
-      </div>
-
-      <div class="grid lg:grid-cols-[1fr_320px] gap-6 items-start">
-        
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-          <div class="border-b bg-gray-50 px-4 py-2 flex flex-wrap gap-2 sticky top-0 z-10">
-            <button type="button" onclick="cmd('bold')" class="w-8 h-8 rounded hover:bg-white hover:shadow flex items-center justify-center text-gray-600"><i class="fa-solid fa-bold"></i></button>
-            <button type="button" onclick="cmd('italic')" class="w-8 h-8 rounded hover:bg-white hover:shadow flex items-center justify-center text-gray-600"><i class="fa-solid fa-italic"></i></button>
-            <span class="w-px h-6 bg-gray-300 my-auto mx-1"></span>
-            <button type="button" onclick="format('h2')" class="px-2 h-8 rounded hover:bg-white hover:shadow text-sm font-bold text-gray-600">H2</button>
-            <button type="button" onclick="format('h3')" class="px-2 h-8 rounded hover:bg-white hover:shadow text-sm font-bold text-gray-600">H3</button>
-            <span class="w-px h-6 bg-gray-300 my-auto mx-1"></span>
-            <button type="button" onclick="cmd('insertUnorderedList')" class="w-8 h-8 rounded hover:bg-white hover:shadow flex items-center justify-center text-gray-600"><i class="fa-solid fa-list-ul"></i></button>
-            <button type="button" onclick="insertLink()" class="w-8 h-8 rounded hover:bg-white hover:shadow flex items-center justify-center text-gray-600"><i class="fa-solid fa-link"></i></button>
-            <button type="button" onclick="insertImage()" class="w-8 h-8 rounded hover:bg-white hover:shadow flex items-center justify-center text-gray-600"><i class="fa-regular fa-image"></i></button>
-            <button type="button" onclick="insertCode()" class="w-8 h-8 rounded hover:bg-white hover:shadow flex items-center justify-center text-gray-600"><i class="fa-solid fa-code"></i></button>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 divide-x divide-gray-100" id="editorContainer">
-            <div class="p-6 md:p-10">
-              <input name="title" value="<?= e((string)($edit['title']??'')) ?>" 
-                     class="zen-input text-3xl md:text-4xl font-extrabold text-gray-900 placeholder-gray-300 mb-6" 
-                     placeholder="Enter your post title here..." autocomplete="off">
-              
-              <div id="editor" class="editor prose max-w-none text-lg text-gray-600" contenteditable="true" 
-                   data-placeholder="Start writing your amazing story..."><?= $edit['content'] ?? '' ?></div>
-            </div>
-
-            <div id="livePreview" class="hidden bg-gray-50 p-6 md:p-10 overflow-y-auto h-[600px] border-l">
-              <div class="text-xs font-bold text-gray-400 uppercase mb-4 tracking-widest text-center">Live Preview</div>
-              <h1 id="prevTitle" class="text-3xl font-extrabold text-gray-900 mb-4"><?= e($edit['title']??'Title') ?></h1>
-              <img id="prevImg" src="<?= e($edit['image']??'') ?>" class="<?= empty($edit['image'])?'hidden':'' ?> w-full rounded-xl mb-6 shadow-sm object-cover max-h-60">
-              <div id="prevContent" class="prose max-w-none prose-blue"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="space-y-5">
-          <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-            <h3 class="font-bold text-gray-900 mb-3">Publishing</h3>
-            <div class="space-y-3">
-              <div>
-                <label class="block text-xs font-bold text-gray-500 uppercase">Status</label>
-                <select name="status" class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-blue-500 outline-none">
-                  <option value="draft" <?= ($edit['status']??'')==='draft'?'selected':'' ?>>Draft</option>
-                  <option value="published" <?= ($edit['status']??'')==='published'?'selected':'' ?>>Published</option>
-                </select>
-              </div>
-              <div>
-                <label class="block text-xs font-bold text-gray-500 uppercase">Date</label>
-                <input name="published_at" value="<?= e((string)($edit['published_at']??now_local())) ?>" class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm">
-              </div>
-            </div>
-          </div>
-
-          <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-             <h3 class="font-bold text-gray-900 mb-3">Featured Image</h3>
-             <div class="relative group cursor-pointer border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 min-h-[150px] flex items-center justify-center overflow-hidden hover:border-blue-400 transition" onclick="document.getElementById('filePick').click()">
-                <input type="file" id="filePick" class="hidden" accept="image/*">
-                <img id="imgPreview" src="<?= e($edit['image']??'') ?>" class="absolute inset-0 w-full h-full object-cover <?= empty($edit['image'])?'hidden':'' ?>">
-                <div class="text-center p-4 text-gray-400 group-hover:text-blue-500">
-                  <i class="fa-solid fa-cloud-arrow-up text-2xl mb-2"></i>
-                  <div class="text-xs font-bold">Click to Upload</div>
-                </div>
-             </div>
-             <input type="hidden" name="image" id="imageUrl" value="<?= e($edit['image']??'') ?>">
-             <div class="mt-3 flex gap-2">
-               <input type="text" placeholder="Or paste URL..." onchange="updateImage(this.value)" class="flex-1 text-xs border rounded px-2 py-1 bg-gray-50">
-               <button type="button" onclick="document.getElementById('imageUrl').value=''; updateImage('')" class="text-xs text-red-500 hover:underline">Remove</button>
-             </div>
-          </div>
-
-          <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-            <h3 class="font-bold text-gray-900 mb-3">Organization</h3>
-            <div class="space-y-3">
-              <div>
-                <label class="block text-xs font-bold text-gray-500 uppercase">Category</label>
-                <input name="category" list="catList" value="<?= e($edit['category']??'Tech') ?>" class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-blue-500 outline-none">
-                <datalist id="catList"><option value="Tech"><option value="News"><option value="Tutorial"></datalist>
-              </div>
-              <div>
-                <label class="block text-xs font-bold text-gray-500 uppercase">Tags</label>
-                <input name="tags" value="<?= e(implode(', ', (array)($edit['tags']??[]))) ?>" placeholder="php, coding..." class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-blue-500 outline-none">
-              </div>
-            </div>
-          </div>
-
-          <details class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 group">
-            <summary class="font-bold text-gray-900 cursor-pointer list-none flex justify-between items-center">
-              <span>Advanced / SEO</span>
-              <i class="fa-solid fa-chevron-down group-open:rotate-180 transition"></i>
-            </summary>
-            <div class="mt-4 space-y-3 pt-3 border-t">
-              <div>
-                <label class="block text-xs font-bold text-gray-500 uppercase">Slug (URL)</label>
-                <input name="slug" value="<?= e($edit['slug']??'') ?>" class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs">
-              </div>
-              <div>
-                <label class="block text-xs font-bold text-gray-500 uppercase">Author</label>
-                <input name="author" value="<?= e($edit['author']??'RajTech') ?>" class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs">
-              </div>
-              <div>
-                <label class="block text-xs font-bold text-gray-500 uppercase">SEO Description</label>
-                <textarea name="seo_desc" rows="3" class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs"><?= e($edit['seo_desc']??'') ?></textarea>
-              </div>
-            </div>
-          </details>
-
-        </div>
-      </div>
-    </form>
-
-  <?php else: ?>
-    <div class="flex flex-col sm:flex-row justify-between items-end gap-4 mb-8">
-      <div>
-        <h1 class="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p class="text-gray-500">Manage your content easily.</p>
-      </div>
-      <a href="admin.php?action=edit" class="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition flex items-center gap-2">
-        <i class="fa-solid fa-plus"></i> New Post
-      </a>
-    </div>
-
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-       <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-         <div class="text-gray-400 text-xs font-bold uppercase">Total Posts</div>
-         <div class="text-3xl font-bold text-gray-900 mt-1"><?= count($posts) ?></div>
-       </div>
-       <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-         <div class="text-green-500 text-xs font-bold uppercase">Published</div>
-         <div class="text-3xl font-bold text-gray-900 mt-1"><?= count(array_filter($posts,fn($p)=>($p['status']??'')==='published')) ?></div>
-       </div>
-    </div>
-
-    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-      <table class="w-full text-left text-sm">
-        <thead class="bg-gray-50 border-b">
-          <tr>
-            <th class="p-4 font-bold text-gray-500">Post Title</th>
-            <th class="p-4 font-bold text-gray-500 w-32">Status</th>
-            <th class="p-4 font-bold text-gray-500 w-40">Date</th>
-            <th class="p-4 font-bold text-gray-500 text-right w-40">Actions</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          <?php foreach($posts as $p): ?>
-            <tr class="hover:bg-gray-50 group">
-              <td class="p-4">
-                <div class="font-bold text-gray-900"><?= e($p['title']??'No Title') ?></div>
-                <div class="text-xs text-gray-400"><?= e($p['category']??'') ?></div>
-              </td>
-              <td class="p-4">
-                <?php $st = $p['status']??'draft'; ?>
-                <span class="px-2 py-1 rounded text-xs font-bold uppercase <?= $st==='published'?'bg-green-100 text-green-700':'bg-orange-100 text-orange-700' ?>">
-                  <?= $st ?>
-                </span>
-              </td>
-              <td class="p-4 text-gray-500 text-xs"><?= date('M d, Y', strtotime($p['published_at']??'now')) ?></td>
-              <td class="p-4 text-right">
-                <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition">
-                  <a href="admin.php?action=edit&id=<?= $p['id'] ?>" class="p-2 text-gray-500 hover:text-blue-600 bg-white border rounded-lg shadow-sm"><i class="fa-solid fa-pen"></i></a>
-                  <a href="admin.php?action=delete&id=<?= $p['id'] ?>" onclick="return confirm('Delete?')" class="p-2 text-gray-500 hover:text-red-600 bg-white border rounded-lg shadow-sm"><i class="fa-solid fa-trash"></i></a>
-                  <a href="<?= post_preview_url($p) ?>" target="_blank" class="p-2 text-gray-500 hover:text-gray-900 bg-white border rounded-lg shadow-sm"><i class="fa-solid fa-eye"></i></a>
-                </div>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-          <?php if(empty($posts)): ?>
-            <tr><td colspan="4" class="p-8 text-center text-gray-400">No posts found. Create one!</td></tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
-    </div>
-  <?php endif; ?>
-
-</div>
-
-<script>
-  // --- Core Editor Functions ---
-  function cmd(c){ document.execCommand(c,false,null); updatePreview(); }
-  function format(tag){ document.execCommand('formatBlock', false, tag); updatePreview(); }
-  function insertLink(){ 
-    let u=prompt('URL:'); if(u) document.execCommand('createLink',false,u); 
-    updatePreview(); 
-  }
-  function insertImage(){ 
-    let u=prompt('Image URL:'); if(u) document.execCommand('insertImage',false,u); 
-    updatePreview(); 
-  }
-  function insertCode(){
-    let c=prompt('Paste Code:'); if(c) {
-      let h=`<pre><code>${c.replace(/</g,'&lt;')}</code></pre>`;
-      document.execCommand('insertHTML',false,h);
-    }
-    updatePreview();
-  }
-
-  // --- Realtime Preview ---
-  const ed = document.getElementById('editor');
-  const tit = document.querySelector('input[name="title"]');
-  const prevContent = document.getElementById('prevContent');
-  const prevTitle = document.getElementById('prevTitle');
-  
-  function updatePreview() {
-    if(!ed) return;
-    if(prevContent) prevContent.innerHTML = ed.innerHTML;
-    if(prevTitle && tit) prevTitle.innerText = tit.value || 'Title';
-  }
-
-  // Bind events
-  if(ed) ed.addEventListener('input', updatePreview);
-  if(tit) tit.addEventListener('input', updatePreview);
-
-  // Split View Toggle
-  function toggleSplitPreview() {
-    const prev = document.getElementById('livePreview');
-    const container = document.getElementById('editorContainer');
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Studio - RajTech</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    if(prev.classList.contains('hidden')) {
-      prev.classList.remove('hidden');
-      container.classList.remove('md:grid-cols-2'); // reset to force grid apply
-      void container.offsetWidth; // trigger reflow
-      container.classList.add('md:grid-cols-2');
-      updatePreview();
-    } else {
-      prev.classList.add('hidden');
-      container.classList.remove('md:grid-cols-2');
-    }
-  }
-
-  // --- Image Upload ---
-  const filePick = document.getElementById('filePick');
-  if(filePick) {
-    filePick.addEventListener('change', async function() {
-      if(!this.files[0]) return;
-      const fd = new FormData(); fd.append('image', this.files[0]);
-      
-      // visual loading state
-      const wrap = this.parentElement;
-      wrap.style.opacity = '0.5';
-      
-      try {
-        let res = await fetch('admin.php?action=upload', {method:'POST', body:fd});
-        let data = await res.json();
-        if(data.ok) {
-          updateImage(data.url);
-          if(document.getElementById('thumb')) document.getElementById('thumb').value = data.thumb;
-        } else {
-          alert(data.message);
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Outfit', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: { brand: { blue: '#2563EB', dark: '#0F172A', bg: '#F8FAFC' } },
+                }
+            }
         }
-      } catch(e) { alert('Upload failed'); }
-      wrap.style.opacity = '1';
-    });
-  }
+    </script>
+    <style>
+        /* Custom Scrollbar for Editor */
+        textarea::-webkit-scrollbar { width: 8px; }
+        textarea::-webkit-scrollbar-track { background: #f1f1f1; }
+        textarea::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        textarea::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Preview Styles */
+        .prose h2 { font-size: 1.5rem; font-weight: 700; margin-top: 1.5em; margin-bottom: 0.5em; color: #1e293b; }
+        .prose p { margin-bottom: 1em; line-height: 1.7; color: #475569; }
+        .prose pre { background: #1e293b; color: #e2e8f0; padding: 1em; border-radius: 0.5em; overflow-x: auto; font-family: 'JetBrains Mono'; font-size: 0.9em; }
+        .prose ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 1em; }
+    </style>
+</head>
+<body class="bg-brand-bg font-sans antialiased h-screen overflow-hidden">
 
-  function updateImage(url) {
-    document.getElementById('imageUrl').value = url;
-    const img = document.getElementById('imgPreview');
-    const prevImg = document.getElementById('prevImg');
+    <?php if (!isset($_SESSION['admin_logged_in'])): ?>
+    <div class="h-full flex items-center justify-center bg-gradient-to-br from-brand-dark to-slate-900">
+        <div class="bg-white/10 backdrop-blur-xl border border-white/10 p-10 rounded-3xl shadow-2xl w-full max-w-sm animate-fade-in">
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 bg-brand-blue rounded-2xl flex items-center justify-center mx-auto mb-4 text-white text-2xl shadow-lg shadow-blue-500/40">
+                    <i class="fa-solid fa-bolt"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-white">Creator Studio</h2>
+            </div>
+            <?php if(isset($error)): ?>
+                <div class="bg-red-500/20 text-red-200 text-xs p-3 rounded-lg mb-4 text-center border border-red-500/30"><?php echo $error; ?></div>
+            <?php endif; ?>
+            <form method="POST" class="space-y-4">
+                <input type="text" name="username" placeholder="Username" class="w-full bg-slate-800/50 border border-slate-600 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-brand-blue transition" required>
+                <input type="password" name="password" placeholder="Password" class="w-full bg-slate-800/50 border border-slate-600 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-brand-blue transition" required>
+                <button type="submit" name="login" class="w-full bg-brand-blue hover:bg-blue-600 text-white font-bold py-3.5 rounded-xl transition shadow-lg shadow-blue-500/30">Enter Dashboard</button>
+            </form>
+        </div>
+    </div>
+
+    <?php else: ?>
     
-    if(url) {
-      img.src = url; img.classList.remove('hidden');
-      if(prevImg) { prevImg.src = url; prevImg.classList.remove('hidden'); }
-    } else {
-      img.classList.add('hidden');
-      if(prevImg) prevImg.classList.add('hidden');
-    }
-  }
+    <div class="flex h-full">
+        
+        <aside class="w-20 md:w-64 bg-white border-r border-gray-200 flex flex-col z-20 transition-all duration-300">
+            <div class="h-20 flex items-center justify-center md:justify-start md:px-8 border-b border-gray-100">
+                <span class="text-2xl font-bold text-brand-dark hidden md:block">Raj<span class="text-brand-blue">Tech</span></span>
+                <span class="text-2xl font-bold text-brand-blue md:hidden"><i class="fa-solid fa-bolt"></i></span>
+            </div>
+            <nav class="flex-1 p-4 space-y-2">
+                <a href="#" class="flex items-center gap-3 px-4 py-3.5 bg-blue-50 text-brand-blue rounded-xl font-medium shadow-sm">
+                    <i class="fa-solid fa-pen-nib text-lg"></i> <span class="hidden md:block">New Article</span>
+                </a>
+                <a href="index.php" target="_blank" class="flex items-center gap-3 px-4 py-3.5 text-gray-500 hover:bg-gray-50 hover:text-gray-900 rounded-xl font-medium transition">
+                    <i class="fa-solid fa-arrow-up-right-from-square text-lg"></i> <span class="hidden md:block">View Site</span>
+                </a>
+            </nav>
+            <div class="p-4 border-t border-gray-100">
+                <a href="?logout=true" class="flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 rounded-xl font-medium transition justify-center md:justify-start">
+                    <i class="fa-solid fa-power-off text-lg"></i> <span class="hidden md:block">Logout</span>
+                </a>
+            </div>
+        </aside>
 
-  // --- Save Logic ---
-  function setAfter(val) { document.getElementById('after').value = val; }
-  function syncContent() {
-    if(ed) document.getElementById('content').value = ed.innerHTML;
-    return true;
-  }
-</script>
+        <main class="flex-1 overflow-y-auto relative">
+            
+            <form method="POST" enctype="multipart/form-data" class="max-w-7xl mx-auto p-4 md:p-8 pb-32">
+                
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                    <div>
+                        <h1 class="text-3xl font-bold text-gray-900">Write New Story</h1>
+                        <p class="text-gray-500 text-sm mt-1">Create impactful content for your audience.</p>
+                    </div>
+                    <?php if($msg): ?>
+                        <div class="px-5 py-2.5 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm animate-pulse
+                            <?php echo $msg_type == 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'; ?>">
+                            <i class="fa-solid <?php echo $msg_type == 'success' ? 'fa-check' : 'fa-triangle-exclamation'; ?>"></i> <?php echo $msg; ?>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <div class="fixed bottom-4 right-4 md:hidden z-50">
+                        <button type="submit" name="publish" class="bg-brand-blue text-white w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-xl">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    
+                    <div class="lg:col-span-2 space-y-6">
+                        
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 group focus-within:ring-2 ring-brand-blue/20 transition">
+                            <input type="text" name="title" placeholder="Enter Article Title Here..." class="w-full text-3xl font-bold text-gray-800 placeholder-gray-300 border-none focus:ring-0 p-0 bg-transparent" required>
+                        </div>
+
+                        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-[650px]">
+                            <div class="flex justify-between items-center px-4 py-3 border-b border-gray-100 bg-gray-50/50">
+                                <div class="flex gap-1 text-gray-500">
+                                    <button type="button" onclick="insertTag('<b>', '</b>')" class="p-2 hover:bg-white hover:text-brand-blue rounded transition" title="Bold"><i class="fa-solid fa-bold"></i></button>
+                                    <button type="button" onclick="insertTag('<i>', '</i>')" class="p-2 hover:bg-white hover:text-brand-blue rounded transition" title="Italic"><i class="fa-solid fa-italic"></i></button>
+                                    <button type="button" onclick="insertTag('<h2>', '</h2>')" class="p-2 hover:bg-white hover:text-brand-blue rounded transition" title="Heading"><i class="fa-solid fa-heading"></i></button>
+                                    <div class="w-px h-6 bg-gray-300 mx-2 self-center"></div>
+                                    <button type="button" onclick="insertTag('<pre>', '</pre>')" class="p-2 hover:bg-white hover:text-brand-blue rounded transition" title="Code Block"><i class="fa-solid fa-code"></i></button>
+                                </div>
+                                <div class="flex bg-gray-200 rounded-lg p-1">
+                                    <button type="button" onclick="switchTab('write')" id="btn-write" class="px-4 py-1 text-xs font-bold rounded-md bg-white text-gray-800 shadow-sm transition">Write</button>
+                                    <button type="button" onclick="switchTab('preview')" id="btn-preview" class="px-4 py-1 text-xs font-bold rounded-md text-gray-500 hover:text-gray-700 transition">Preview</button>
+                                </div>
+                            </div>
+
+                            <textarea id="editor-area" name="content" class="w-full flex-1 p-6 resize-none border-none focus:ring-0 text-gray-700 font-mono text-base leading-relaxed" placeholder="Start writing your amazing story..." required></textarea>
+                            
+                            <div id="preview-area" class="w-full flex-1 p-8 overflow-y-auto hidden prose max-w-none">
+                                <p class="text-gray-400 italic text-center mt-20">Preview will appear here...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-6">
+                        
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fa-solid fa-rocket text-brand-blue"></i> Publish</h3>
+                            <div class="mb-4">
+                                <label class="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-2">Schedule (Optional)</label>
+                                <input type="datetime-local" name="scheduled_at" class="w-full border-gray-200 rounded-xl text-sm focus:border-brand-blue focus:ring-brand-blue/20">
+                            </div>
+                            <button type="submit" name="publish" class="w-full bg-brand-blue hover:bg-blue-600 text-white font-bold py-3.5 rounded-xl transition shadow-lg shadow-blue-500/30">
+                                Publish Now
+                            </button>
+                        </div>
+
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <h3 class="font-bold text-gray-800 mb-4">Category</h3>
+                            <select name="category_select" id="catSelect" class="w-full border-gray-200 rounded-xl text-sm mb-3 focus:border-brand-blue focus:ring-brand-blue/20" onchange="document.getElementById('newCatInput').value = ''">
+                                <option value="">Select Existing</option>
+                                <?php foreach($cats as $cat): ?>
+                                    <option value="<?php echo htmlspecialchars($cat); ?>"><?php echo htmlspecialchars($cat); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <input type="text" name="new_category" id="newCatInput" placeholder="...or create new" class="w-full border-gray-200 rounded-xl text-sm focus:border-brand-blue focus:ring-brand-blue/20" oninput="document.getElementById('catSelect').value = ''">
+                        </div>
+
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <h3 class="font-bold text-gray-800 mb-4">Featured Image</h3>
+                            
+                            <div class="flex border-b border-gray-100 mb-4">
+                                <button type="button" onclick="toggleImageInput('upload')" id="tab-upload" class="flex-1 pb-2 text-sm font-bold text-brand-blue border-b-2 border-brand-blue">Upload</button>
+                                <button type="button" onclick="toggleImageInput('url')" id="tab-url" class="flex-1 pb-2 text-sm font-bold text-gray-400">Link</button>
+                            </div>
+
+                            <div id="input-upload">
+                                <label class="w-full h-32 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-brand-blue hover:bg-blue-50 transition group text-gray-400">
+                                    <i class="fa-solid fa-cloud-arrow-up text-2xl mb-2 group-hover:text-brand-blue transition"></i>
+                                    <span class="text-xs group-hover:text-brand-blue">Click to Upload</span>
+                                    <input type="file" name="image_file" class="hidden" accept="image/*" onchange="previewFile(this)">
+                                </label>
+                            </div>
+
+                            <div id="input-url" class="hidden">
+                                <input type="text" name="image_url" id="urlField" placeholder="https://..." class="w-full border-gray-200 rounded-xl text-sm focus:border-brand-blue focus:ring-brand-blue/20" oninput="document.getElementById('preview-img').src = this.value; document.getElementById('preview-box').classList.remove('hidden');">
+                            </div>
+
+                            <div id="preview-box" class="mt-4 hidden relative rounded-xl overflow-hidden border border-gray-200">
+                                <img id="preview-img" src="" class="w-full h-40 object-cover">
+                                <button type="button" onclick="clearImage()" class="absolute top-2 right-2 bg-red-500 text-white w-6 h-6 rounded-full text-xs flex items-center justify-center hover:bg-red-600 shadow-sm"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <h3 class="font-bold text-gray-800 mb-2">Excerpt</h3>
+                            <textarea name="excerpt" rows="3" class="w-full border-gray-200 rounded-xl text-sm focus:border-brand-blue focus:ring-brand-blue/20" placeholder="Short description..." required></textarea>
+                        </div>
+
+                    </div>
+                </div>
+            </form>
+        </main>
+    </div>
+
+    <script>
+        // 1. Editor Tabs & Preview
+        function switchTab(mode) {
+            const editor = document.getElementById('editor-area');
+            const preview = document.getElementById('preview-area');
+            const btnWrite = document.getElementById('btn-write');
+            const btnPrev = document.getElementById('btn-preview');
+
+            if(mode === 'preview') {
+                editor.classList.add('hidden');
+                preview.classList.remove('hidden');
+                preview.innerHTML = editor.value || '<p class="text-gray-400 italic text-center mt-20">Nothing to preview...</p>';
+                
+                btnPrev.className = "px-4 py-1 text-xs font-bold rounded-md bg-white text-gray-800 shadow-sm transition";
+                btnWrite.className = "px-4 py-1 text-xs font-bold rounded-md text-gray-500 hover:text-gray-700 transition";
+            } else {
+                editor.classList.remove('hidden');
+                preview.classList.add('hidden');
+                
+                btnWrite.className = "px-4 py-1 text-xs font-bold rounded-md bg-white text-gray-800 shadow-sm transition";
+                btnPrev.className = "px-4 py-1 text-xs font-bold rounded-md text-gray-500 hover:text-gray-700 transition";
+            }
+        }
+
+        // 2. Toolbar Logic
+        function insertTag(start, end) {
+            const textarea = document.getElementById('editor-area');
+            const selectionStart = textarea.selectionStart;
+            const selectionEnd = textarea.selectionEnd;
+            const oldText = textarea.value;
+            const selectedText = oldText.substring(selectionStart, selectionEnd);
+            
+            textarea.value = oldText.substring(0, selectionStart) + start + selectedText + end + oldText.substring(selectionEnd);
+            textarea.focus(); // Keep focus
+        }
+
+        // 3. Image Handling
+        function toggleImageInput(type) {
+            const uploadDiv = document.getElementById('input-upload');
+            const urlDiv = document.getElementById('input-url');
+            const tabUp = document.getElementById('tab-upload');
+            const tabUrl = document.getElementById('tab-url');
+
+            if(type === 'upload') {
+                uploadDiv.classList.remove('hidden');
+                urlDiv.classList.add('hidden');
+                document.getElementById('urlField').value = ''; // clear url
+                
+                tabUp.className = "flex-1 pb-2 text-sm font-bold text-brand-blue border-b-2 border-brand-blue";
+                tabUrl.className = "flex-1 pb-2 text-sm font-bold text-gray-400";
+            } else {
+                uploadDiv.classList.add('hidden');
+                urlDiv.classList.remove('hidden');
+                
+                tabUrl.className = "flex-1 pb-2 text-sm font-bold text-brand-blue border-b-2 border-brand-blue";
+                tabUp.className = "flex-1 pb-2 text-sm font-bold text-gray-400";
+            }
+        }
+
+        function previewFile(input) {
+            const file = input.files[0];
+            if(file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('preview-img').src = e.target.result;
+                    document.getElementById('preview-box').classList.remove('hidden');
+                }
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function clearImage() {
+            document.getElementById('preview-box').classList.add('hidden');
+            document.getElementById('preview-img').src = '';
+            document.querySelector('input[name="image_file"]').value = '';
+            document.getElementById('urlField').value = '';
+        }
+    </script>
+    <?php endif; ?>
 </body>
 </html>
